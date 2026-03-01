@@ -55,6 +55,12 @@ export const useAuthStore = defineStore('auth', () => {
     if (error) throw error
   }
 
+  // 账户删除
+  async function deleteAccount() {
+    const { error } = await supabase.rpc('delete_account')
+    if (error) throw error
+  }
+
   // 导出状态、计算属性和方法
   return {
     // state
@@ -69,5 +75,6 @@ export const useAuthStore = defineStore('auth', () => {
     signUp,
     signInWithPassword,
     signOut,
+    deleteAccount,
   }
 })

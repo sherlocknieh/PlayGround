@@ -2,10 +2,12 @@
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import router from './router'
+import Settings from '@/components/Settings.vue'
 
 const auth = useAuthStore()
 
 const logoutLoading = ref(false)
+const showSettings = ref(false)
 
 const handleLogout = async () => {
   logoutLoading.value = true
@@ -27,7 +29,9 @@ const handleLogout = async () => {
       {{ $route.meta.title || 'My App' }}
     </div>
     <!-- 顶栏右侧 -->
-     <div class="flex items-center">
+    <div class="flex items-center gap-4">
+      <!-- 设置按钮 -->
+      <button v-if="auth.isAuthenticated" @click="showSettings = true" class="underline">设置</button>
       <RouterLink v-if="!auth.isAuthenticated" to="/login" class="underline">登录</RouterLink>
       <!-- 退出登录按钮 -->
       <button v-if="auth.isAuthenticated" @click="handleLogout" class="underline cursor-pointer flex items-center">
@@ -35,11 +39,12 @@ const handleLogout = async () => {
         <div v-if="logoutLoading" class="animate-spin w-5 h-5 border-t-2 rounded-full"></div>
         <div v-else>退出登录</div>
       </button>
-     </div>
+    </div>
   </header>
 
   <main class="grow flex flex-col justify-center items-center">
     <RouterView />
+    <Settings v-model="showSettings" />
   </main>
 
   <footer class="border-t flex justify-between">
@@ -51,10 +56,14 @@ const handleLogout = async () => {
 
 <style>
 /* 跟随浏览器切换夜间模式 */
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: light dark;
+}
 
 /* 使用柔和的边框颜色 */
-* { border-color: grey;}
+* {
+  border-color: grey;
+}
 
 /* 根元素 Flex 布局 */
 #app {
