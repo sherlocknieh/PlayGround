@@ -1,0 +1,7 @@
+# Supabase
+.branches
+.temp
+
+# Frontend
+node_modules
+dist
