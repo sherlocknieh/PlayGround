@@ -1,24 +1,29 @@
 <script setup lang="ts">
-import Hello from './components/HelloWorld.vue';
 </script>
 
 
 <template>
   <header class="border-b flex justify-between items-center px-4 py-2">
     <!-- 顶栏左侧 -->
-    <div class="flex items-center">顶栏左侧</div>
+    <div class="flex items-center">
+      <RouterLink to="/" class="underline">Home</RouterLink>
+    </div>
     <!-- 顶栏中部 -->
-    <div class="grow flex justify-center items-center">顶栏中部</div>
+    <div class="grow flex justify-center items-center">
+      {{ $route.meta.title || 'My App' }}
+    </div>
     <!-- 顶栏右侧 -->
-     <div class="flex items-center">顶栏右侧</div>
+     <div class="flex items-center">
+      <RouterLink to="/login" class="underline">Login</RouterLink>
+    </div>
   </header>
 
   <main class="grow flex flex-col justify-center items-center">
-    <Hello msg="Hello, Tailwind CSS" />
+    <RouterView />
   </main>
 
   <footer class="border-t text-center">
-    状态栏
+    当前路由: {{ $route.path }}
   </footer>
 </template>
 

@@ -2,7 +2,7 @@
 const props = defineProps({
     msg: {
         type: String,
-        default: 'Hello, World!',
+        default: '登录组件',
     },
 })
 </script>

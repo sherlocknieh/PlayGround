@@ -15,3 +15,4 @@
   - Language: `TypeScript`
 - 引入第三方库:
   - tailwindcss: `npm install tailwindcss @tailwindcss/vite`
+  - vue-router: `npm install vue-router@4`
