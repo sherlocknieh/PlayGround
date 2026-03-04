@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   display_name text,     -- [可选] 昵称
   avatar_url text,       -- [可选] 头像 URL
   user_name text UNIQUE, -- [可选] 唯一用户名
+  settings JSONB DEFAULT '{}'::jsonb, -- 其它设置，使用 JSONB 存储，默认为空对象
   -- 最后更新时间
   updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
