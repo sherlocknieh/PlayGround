@@ -13,3 +13,5 @@
   - Package name: `playground`
   - Framework: `Vue`
   - Language: `TypeScript`
+- 引入第三方库:
+  - tailwindcss: `npm install tailwindcss @tailwindcss/vite`
