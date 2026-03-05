@@ -1,4 +1,13 @@
 <script setup lang="ts">
+import { useAuth } from '@/composables/useAuth'
+import router from './router';
+
+const auth = useAuth()
+
+const handleLogout = async () => {
+  await auth.signOut()
+  router.push({ name: 'home' }) // 登出后跳转到首页
+}
 </script>
 
 
@@ -14,16 +23,18 @@
     </div>
     <!-- 顶栏右侧 -->
      <div class="flex items-center">
-      <RouterLink to="/login" class="underline">Login</RouterLink>
-    </div>
+      <RouterLink v-if="!auth.isAuthed.value" to="/login" class="p-2 underline">Login</RouterLink>
+      <button v-if="auth.isAuthed.value" @click="handleLogout" class="p-2 underline cursor-pointer">Logout</button>
+     </div>
   </header>
 
   <main class="grow flex flex-col justify-center items-center">
     <RouterView />
   </main>
 
-  <footer class="border-t text-center">
-    当前路由: {{ $route.path }}
+  <footer class="border-t flex justify-between">
+    <div>当前路由: {{ $route.path }}</div>
+    <div>登录状态: {{ auth.isAuthed.value ? '[🟢已登录]' : '[🔴未登录]' }}</div>
   </footer>
 </template>
 
