@@ -18,6 +18,22 @@
   - 在 `<项目主页>/auth/providers` 中关闭
   - 可简化注册流程, 并避免回调 URL 与哈希路由不兼容的问题
 
+- 配置注册回调 URL:
+  - 在 `<项目主页>/auth/url-configuration` 的 `Redirect URLs` 区域添加:
+  - `http://localhost:*/**`  (本地开发)
+  - `https://*.github.io/**` (生产环境)
+  - 客户端注册时要指定回调 URL:
+    ```ts
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/PlayGround/`, // 注册成功后重定向的 URL
+      },
+    })
+    ```
+  - 完成这些配置后, 才建议开启 `Confirm email` 功能, 否则用户注册后无法正确回调到应用
+
 # 前端
 
 - 初始化: `npm create vite@latest`

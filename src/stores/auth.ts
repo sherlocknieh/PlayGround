@@ -31,7 +31,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 注册新用户
   async function signUp(email: string, password: string) {
-    const { data, error } = await supabase.auth.signUp({email, password})
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/PlayGround/`, // 注册成功后重定向的 URL
+      },
+    })
     if (error) throw error
     return data
   }
