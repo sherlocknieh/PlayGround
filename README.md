@@ -29,3 +29,4 @@
   - tailwindcss: `npm install tailwindcss @tailwindcss/vite`
   - vue-router: `npm install vue-router@4`
   - supabase-js: `npm install @supabase/supabase-js`
+  - pinia: `npm install pinia`

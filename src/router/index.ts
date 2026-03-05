@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { useAuth } from '@/composables/useAuth'
+import { useAuthStore } from '@/stores/auth'
 
 // 路由定义
 const router = createRouter({
@@ -41,17 +41,16 @@ router.afterEach((to) => {
 
 // 路由重定向配置
 router.beforeEach(async (to, _from) => {
-  // 获取认证状态
-  const { initAuth, isAuthed } = useAuth();
-  await initAuth();  // 初始化认证状态
-  // 未登录时: 访问需要认证的页面 -> 重定向到登录页
-  if (to.meta.requiresAuth && !isAuthed.value) {
-    return { name: 'login' };
+
+  const auth = useAuthStore() // 导入认证管理器
+  await auth.initAuth()       // 初始化认证状态
+
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
+    return { name: 'login' }
   }
-  // 已登录时: 访问登录页 -> 重定向到应用页
-  if (to.name === 'login' && isAuthed.value) {
-    return { name: 'app' };
+  if (to.name === 'login' && auth.isAuthenticated) {
+    return { name: 'app' }
   }
-});
+})
 
 export default router;

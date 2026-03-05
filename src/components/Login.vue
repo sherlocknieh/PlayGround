@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 登录窗口组件
 import { ref } from 'vue'
-import { useAuth } from '@/composables/useAuth'
+import { useAuthStore } from '@/stores/auth'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const auth = useAuth()
+const auth = useAuthStore()
 
 const username = ref('') // 默认用户名
 const password = ref('') // 默认密码

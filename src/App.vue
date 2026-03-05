@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useAuth } from '@/composables/useAuth'
-import router from './router';
 import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import router from './router'
 
-const auth = useAuth()
+const auth = useAuthStore()
 
 const logoutLoading = ref(false)
 
@@ -28,12 +28,12 @@ const handleLogout = async () => {
     </div>
     <!-- 顶栏右侧 -->
      <div class="flex items-center">
-      <RouterLink v-if="!auth.isAuthed.value" to="/login" class="p-2 underline">Login</RouterLink>
-      <button v-if="auth.isAuthed.value" @click="handleLogout" class="p-2 underline cursor-pointer flex items-center">
+      <RouterLink v-if="!auth.isAuthenticated" to="/login" class="underline">登录</RouterLink>
+      <!-- 退出登录按钮 -->
+      <button v-if="auth.isAuthenticated" @click="handleLogout" class="underline cursor-pointer flex items-center">
         <!-- 登出加载动画 -->
-        <div v-if="logoutLoading"
-          class="animate-spin w-5 h-5 border-t-2 rounded-full"></div>
-        <div v-else>Logout</div>
+        <div v-if="logoutLoading" class="animate-spin w-5 h-5 border-t-2 rounded-full"></div>
+        <div v-else>退出登录</div>
       </button>
      </div>
   </header>
@@ -44,7 +44,7 @@ const handleLogout = async () => {
 
   <footer class="border-t flex justify-between">
     <div>当前路由: {{ $route.path }}</div>
-    <div>登录状态: {{ auth.isAuthed.value ? '[🟢已登录]' : '[🔴未登录]' }}</div>
+    <div>登录状态: {{ auth.isAuthenticated ? '[🟢已登录]' : '[🔴未登录]' }}</div>
   </footer>
 </template>
 
