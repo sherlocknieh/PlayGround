@@ -1,7 +1,36 @@
 {
-  "files": [],
-  "references": [
-    { "path": ".tsconfigs/tsconfig.app.json" },
-    { "path": ".tsconfigs/tsconfig.node.json" }
-  ]
+
+  "extends": "@vue/tsconfig/tsconfig.dom.json", // 继承 Vue 官方 DOM 配置
+  "include": ["src/**/*","src/**/*.vue","vite.config.ts"],  // 包含前端和后端相关文件
+  "exclude": ["node_modules", "dist"],  // 哪些文件不需要被 TypeScript 处理
+  
+  "compilerOptions": {
+    "types": ["vite/client","node"], // 包含 Vite 和 Node 类型声明
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo", // Vue 构建信息缓存
+    
+    
+    "target": "ES2023", // 指定 ECMAScript 版本
+    "lib": ["ES2023","DOM","DOM.Iterable"], // 指定库
+    "module": "ESNext", // 使用最新模块标准
+    "skipLibCheck": true, // 跳过库类型检查
+
+    /* Bundler mode */
+    "moduleResolution": "bundler", // 使用打包器解析模块
+    "allowImportingTsExtensions": true, // 允许导入 .ts 扩展
+    "verbatimModuleSyntax": true, // 保留原始模块语法
+    "moduleDetection": "force", // 强制模块检测
+    "noEmit": true, // 不生成输出文件
+
+    /* Linting */
+    "strict": true, // 严格类型检查
+    "noUnusedLocals": true, // 禁止未使用的局部变量
+    "noUnusedParameters": true, // 禁止未使用的参数
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true, // 禁止 switch 语句贯穿
+    "noUncheckedSideEffectImports": true, // 禁止未检查的副作用导入
+    
+    // 路径别名配置
+    "baseUrl": ".", // 基础路径
+    "paths": { "@/*": ["./src/*"] } // 路径别名配置,
+  },
 }
