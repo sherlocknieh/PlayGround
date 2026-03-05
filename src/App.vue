@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { useAuth } from '@/composables/useAuth'
 import router from './router';
+import { ref } from 'vue'
 
 const auth = useAuth()
 
+const logoutLoading = ref(false)
+
 const handleLogout = async () => {
+  logoutLoading.value = true
   await auth.signOut()
+  logoutLoading.value = false
   router.push({ name: 'home' }) // 登出后跳转到首页
 }
 </script>
@@ -24,7 +29,12 @@ const handleLogout = async () => {
     <!-- 顶栏右侧 -->
      <div class="flex items-center">
       <RouterLink v-if="!auth.isAuthed.value" to="/login" class="p-2 underline">Login</RouterLink>
-      <button v-if="auth.isAuthed.value" @click="handleLogout" class="p-2 underline cursor-pointer">Logout</button>
+      <button v-if="auth.isAuthed.value" @click="handleLogout" class="p-2 underline cursor-pointer flex items-center">
+        <!-- 登出加载动画 -->
+        <div v-if="logoutLoading"
+          class="animate-spin w-5 h-5 border-t-2 rounded-full"></div>
+        <div v-else>Logout</div>
+      </button>
      </div>
   </header>
 

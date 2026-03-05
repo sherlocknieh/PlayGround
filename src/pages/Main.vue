@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuth } from '@/composables/useAuth'  
-const { userName } = useAuth()
-const usernameRef = ref(userName.value || '') // 默认用户名
+const { user } = useAuth()
+const usernameRef = ref(user.value?.email || '') // 默认用户名
 </script>
 
 
