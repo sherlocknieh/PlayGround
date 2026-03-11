@@ -21,7 +21,6 @@
   - 取消部署函数: `npx supabase functions delete hello-world`
   - [访问官方教程](https://supabase.com/docs/guides/functions/quickstart);
 
-
 ### 客户端接入准备
 - 获取 `Project URL` 和 `Publishable Key`:
   - 在项目主页顶部 `Connect` 按钮中 `API Keys` 子选项卡获取
@@ -49,6 +48,17 @@
     })
     ```
   - 完成这些配置后, 才建议开启 `Confirm email` 功能, 否则用户注册成功后无法正确回到应用, 会以为注册失败.
+
+### TypeScript 类型支持
+  - 为表格生成TS类型: `npx supabase gen types typescript --linked --schema public > src/lib/database.types.ts`
+  - 用法: 
+    ```ts
+    import type { Database } from '@/lib/database.types'
+    type Task = Database['public']['Tables']['tasks']['Row']
+    // 或者
+    import type { Tables } from '@/lib/database.types'
+    type Task = Tables<'tasks'>
+    ```
 
 # 前端
 
