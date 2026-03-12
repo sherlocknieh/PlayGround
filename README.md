@@ -51,7 +51,7 @@
 
 ### TypeScript 类型支持
   - 为表格生成TS类型: `npx supabase gen types typescript --linked --schema public > src/lib/database.types.ts`
-  - 用法: 
+  - 使用方法: 
     ```ts
     import type { Database } from '@/lib/database.types'
     type Task = Database['public']['Tables']['tasks']['Row']
@@ -59,6 +59,8 @@
     import type { Tables } from '@/lib/database.types'
     type Task = Tables<'tasks'>
     ```
+  - 每次修改数据库结构后, 记得重新生成类型定义文件, 以保持类型的准确性. 
+  - 官方的定义中可能存在 Json 递归类型定义, 建议手动改写 `json` 类型为 `Record<string, unknown>`, 避免"类型实例化过深"问题.
 
 # 前端
 
