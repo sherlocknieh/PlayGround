@@ -61,12 +61,8 @@ export const useAuthStore = defineStore('auth', () => {
     if (error) throw error
   }
 
-  // 导出状态、计算属性和方法
+  // 导出状态和方法接口
   return {
-    // state
-    _session,
-    _initialized,
-    _loading,
     // getters
     isAuthenticated: computed(() => !!_session.value?.user),
     user: computed<User | null>(() => _session.value?.user ?? null),
