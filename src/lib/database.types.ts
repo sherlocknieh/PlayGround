@@ -1,10 +1,4 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+export type Json = Record<string, unknown>
 
 export type Database = {
   // Allows to automatically instantiate createClient with right options
@@ -52,7 +46,7 @@ export type Database = {
           parent_id: string | null
           sort_order: number | null
           start_time: string | null
-          status: string
+          status: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at: string
           user_id: string
@@ -67,7 +61,7 @@ export type Database = {
           parent_id?: string | null
           sort_order?: number | null
           start_time?: string | null
-          status?: string
+          status?: Database["public"]["Enums"]["task_status"]
           title?: string
           updated_at?: string
           user_id: string
@@ -82,7 +76,7 @@ export type Database = {
           parent_id?: string | null
           sort_order?: number | null
           start_time?: string | null
-          status?: string
+          status?: Database["public"]["Enums"]["task_status"]
           title?: string
           updated_at?: string
           user_id?: string
@@ -105,7 +99,7 @@ export type Database = {
       delete_account: { Args: never; Returns: undefined }
     }
     Enums: {
-      [_ in never]: never
+      task_status: "todo" | "doing" | "done"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -232,6 +226,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      task_status: ["todo", "doing", "done"],
+    },
   },
 } as const
