@@ -1,4 +1,4 @@
--- 1. 创建任务状态枚举类型
+-- 创建任务状态枚举类型
 CREATE TYPE public.task_status AS ENUM ('todo', 'doing', 'done');
 
 -- 任务表 (tasks)
@@ -72,3 +72,72 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trigger_set_sort_order
   BEFORE INSERT ON public.tasks
   FOR EACH ROW EXECUTE FUNCTION public.set_default_sort_order();
+
+
+-- RPC 函数：软删除任务 (及其子任务)
+CREATE OR REPLACE FUNCTION public.soft_delete_tasks(
+  task_ids UUID[]           -- 传入要删除的任务 ID 列表
+)
+RETURNS SETOF public.tasks  -- 返回被删除的任务列表
+SET search_path = ''        -- 设置 search_path, 避免 Function Search Path Mutable 安全警告
+SECURITY INVOKER            -- 以调用者权限执行，确保只能删除自己的任务
+AS $$
+DECLARE
+  target_ids UUID[];                    -- 最终要软删除的任务 ID 集合
+  deleted_at_now TIMESTAMPTZ := NOW();  -- 统一删除时间，保证同一批记录时间一致
+BEGIN
+  -- task_ids 为 NULL 或空数组时，不做任何更新
+  IF task_ids IS NULL OR array_length(task_ids, 1) IS NULL THEN
+    RETURN;  -- 返回空结果集
+  END IF;
+
+  -- 递归收集根任务 + 所有后代任务
+
+  -- 定义递归表 task_tree
+  WITH RECURSIVE task_tree AS (
+  -- 它会不断用上一轮的查询结果参与下一轮查询, 直到没有新增的结果为止
+
+    -- 初始查询：找到参数中 ID 所指定的任务（根任务）
+    SELECT t.id FROM public.tasks t
+    WHERE t.id = ANY(task_ids)      -- 找到参数中ID所指定的任务
+      AND t.user_id = auth.uid()    -- 排除不属于当前用户的任务
+      AND t.deleted_at IS NULL      -- 排除已经被软删除的任务
+
+    UNION                           -- 把递归查询结果并入结果中
+
+    -- 递归查询：用初始查询的结果继续查找子任务
+    SELECT c.id FROM public.tasks c JOIN task_tree tt
+    ON c.parent_id = tt.id          -- 找到 task_tree 中任务的所有子任务
+    WHERE c.user_id = auth.uid()    -- 继续限制为当前用户
+      AND c.deleted_at IS NULL      -- 排除已软删除的任务
+  )
+
+  -- 将递归结果汇总 (array_agg) 为数组, 存入 target_ids 变量
+  -- COALESCE 用于把 NULL 结果转化为空数组 []::UUID[]
+  SELECT COALESCE(array_agg(id), ARRAY[]::UUID[])
+  INTO target_ids FROM task_tree;
+
+  -- 是空数组则直接返回
+  IF array_length(target_ids, 1) IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- 执行软删除：把 deleted_at 置为统一时间戳
+  RETURN QUERY
+  UPDATE public.tasks t
+  SET deleted_at = deleted_at_now
+  WHERE t.id = ANY(target_ids)
+    AND t.user_id = auth.uid()
+
+  -- 返回所有被更新的任务记录
+  RETURNING t.*;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 用法示例：
+
+-- SELECT * FROM public.soft_delete_tasks(ARRAY[UUID1]);
+-- SELECT * FROM public.soft_delete_tasks(ARRAY[UUID1, UUID2]);
+
+-- 前端调用:
+-- const result = await supabase.rpc('soft_delete_tasks', { task_ids: [UUID1, UUID2] });
