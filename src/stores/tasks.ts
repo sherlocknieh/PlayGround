@@ -1,66 +1,80 @@
+import { supabase } from '@/lib/supabase'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { supabase } from '@/lib/supabase'
-import type { Tables } from '@/lib/database.types'
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
+import type { Task, TaskNode, TaskMap, IndentedTask, Payload } from './tasks.types'
 
-// 任务类型定义
-export type Task = Tables<'tasks'>
-// 数据变更负载类型
-export type Payload = RealtimePostgresChangesPayload<Task>
-// 缩进列表式任务树
-export type IndentTaskTree = (Task & { depth: number })[]
 
-export interface CreateTaskInput {
-  userId: string
-  title: string
-  description?: string | null
-  parentId?: string | null
-}
-
-// 任务储存管理
 export const useTasksStore = defineStore('tasks', () => {
-  // 基本数据
+
+  // 任务列表 (唯一数据源)
   const tasks = ref<Task[]>([])
 
-  // 派生数据
-  const todo = computed<Task[]>(() => tasks.value.filter(task => task.status === 'todo'))
-  const doing = computed<Task[]>(() => tasks.value.filter(task => task.status === 'doing'))
-  const done = computed<Task[]>(() => tasks.value.filter(task => task.status === 'done'))
-  const deleted = computed<Task[]>(() => tasks.value.filter(task => task.deleted_at !== null))
-
-  // 内部辅助状态
+  // 辅助变量
   const _isLoading = ref(false)
-  const _isMutating = ref(false)
   const _isInitialized = ref(false)
 
-  const _upsertTask = (incoming: Task) => {
-    const idx = tasks.value.findIndex(t => t.id === incoming.id)
-    if (idx === -1) {
-      tasks.value.push(incoming)
-      return
-    }
+  const taskMetadata = computed(() => {
+    const map: TaskMap = {}
+    
+    // 1. 构建 Map (同时也是构建了内存中的引用树)
+    // 第一遍：创建所有节点的拷贝（加上 children 容器）
+    // 使用浅拷贝 {...t} 确保修改 Map 不会意外污染原始 tasks 数组
+    tasks.value.forEach(t => {
+      map[t.id] = { ...t, children: [] }
+    })
+    
+    // 2. 建立父子引用关系
+    tasks.value.forEach(t => {
+      if (t.parent_id && map[t.parent_id]) {
+        map[t.parent_id].children.push(map[t.id])
+      }
+      // else {
+      //   rootIds.push(t.id)
+      // }
+    })
+    
+    
+    // 对每一层的 children 进行排序 (基于 sort_order)
+    // Object.values(map).forEach(node => {
+    //   node.children.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    // })
 
-    const current = tasks.value[idx]!
-    const currentTs = Date.parse(current.updated_at)
-    const incomingTs = Date.parse(incoming.updated_at)
-
-    // 如果本地版本更新, 忽略回放的旧事件
-    if (!Number.isNaN(currentTs) && !Number.isNaN(incomingTs) && incomingTs < currentTs) {
-      return
-    }
-
-    // 避免相同数据触发二次写入
-    if (JSON.stringify(current) === JSON.stringify(incoming)) {
-      return
-    }
-
-    tasks.value[idx] = incoming
-  }
+    // 3. 只提取出“根节点”作为渲染入口
+    const rootTasks = Object.values(map).filter(node => !node.parent_id)
   
-  // 操作
+    return { map, rootTasks }
+  })
   
-  // 1. 获取基本数据
+  // 暴露给外部使用
+  const tasksById = computed(() => taskMetadata.value.map)
+  const rootTasks = computed(() => taskMetadata.value.rootTasks)
+
+
+  // 扁平缩进列表：用于虚拟滚动或简单列表渲染
+  const indentTaskList = computed<IndentedTask[]>(() => {
+    const list: IndentedTask[] = []
+    
+    function dfs(nodes: TaskNode[], depth: number) {
+      nodes.forEach((node, index) => {
+        list.push({
+          ...node,
+          depth,
+          hasChildren: node.children.length > 0,
+          isLastChild: index === nodes.length - 1
+        })
+        if (node.children.length > 0) {
+          dfs(node.children, depth + 1)
+        }
+      })
+    }
+
+    dfs(rootTasks.value, 0)
+    return list
+  })
+
+
+  // --- ACTIONS ---
+  // 1. Fetch all tasks from Supabase
   async function fetchAllTasks() {
     _isLoading.value = true
     const { data, error } = await supabase
@@ -69,88 +83,75 @@ export const useTasksStore = defineStore('tasks', () => {
       .order('sort_order', { ascending: true })
 
     _isLoading.value = false
-    
-    if (error) {
-      console.error('Error fetching tasks:', error)
-      return
-    }
+    if (error) return console.error('Fetch error:', error)
+
     tasks.value = data || []
     _isInitialized.value = true
   }
 
-
-  // 2. 开启实时监听
+  // 2. 开启数据库变化监听 (基于 WebSocket, 需要后端开启 Supabase Realtime)
   function initRealtime() {
     const channel = supabase
-      .channel('tasks-realtime')  // 频道名称可自定义
-      .on(
-        'postgres_changes',       // 监听 PostgreSQL 变更事件
-        { 
-          event: '*',
-          schema: 'public',       
-          table: 'tasks'
-        },                        // 监听 public.tasks 表的所有变更
-        (payload: Payload) => {
-          _handlePayload(payload)  // 调用 _handlePayload 处理变更数据
-        }
-      )
-      .subscribe()                // 开启订阅
+      .channel('tasks-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, _handlePayload)
+      .subscribe()
 
-    return () => supabase.removeChannel(channel) // 返回卸载函数
-  }
-  // 处理实时变更数据, 保持本地数据与数据库同步
-  const _handlePayload = (payload: Payload) => {
-    const { eventType, new: newRecord, old: oldRecord } = payload
-    console.log('[Realtime Event]', payload)
-    // 处理 INSERT, UPDATE, DELETE 事件
-    if (eventType === 'INSERT') {
-      _upsertTask(newRecord)
-    }
-    else if (eventType === 'UPDATE') {
-      _upsertTask(newRecord)
-    }
-    else if (eventType === 'DELETE') {
-      const oldId = oldRecord?.id
-      if (!oldId) return
-      tasks.value = tasks.value.filter(t => t.id !== oldId)
-    }
+    return () => supabase.removeChannel(channel)
   }
 
-  // 3. 新建任务
-  async function createTask(_parentId: Task['parent_id'] = null) {
-  }
+  function _upsertTask(incoming: Task) {
+    const index = tasks.value.findIndex(t => t.id === incoming.id)
 
-  // 4. 删除任务
-  async function deleteTask(taskId: Task['id'], softDelete: boolean = true) {
-    _isMutating.value = true
-    if (softDelete) {
-      // 软删除, 调用 RPC 函数实现级联软删除
-      const result = await supabase
-        .rpc('soft_delete_tasks', { task_ids: [taskId] })
-      console.log('Soft delete result:', result)
+    if (index === -1) {
+      // 1. Insert: Just push to the array
+      tasks.value.push(incoming)
     } else {
-      // 硬删除, 直接从数据库删除, 级联删除由数据库外键约束实现
-      const result = await supabase
-        .from('tasks')
-        .delete()
-        .match({ id: taskId })
-      console.log('Hard delete result:', result)
+      // 2. Update: Conflict Resolution Logic
+      const current = tasks.value[index]
+      const currentTs = new Date(current.updated_at).getTime()
+      const incomingTs = new Date(incoming.updated_at).getTime()
+
+      // If incoming data is older than local data, ignore it (Stale update)
+      if (incomingTs < currentTs) return
+
+      // Reactive update at the specific index
+      tasks.value[index] = { ...current, ...incoming }
     }
-    _isMutating.value = false
   }
 
-  // 导出访问接口
+  function _handlePayload(payload: Payload) {
+    const { eventType, new: newRecord, old: oldRecord } = payload
+
+    switch (eventType) {
+      case 'INSERT':
+      case 'UPDATE':
+        if (newRecord) _upsertTask(newRecord as Task)
+        break
+      case 'DELETE':
+        if (oldRecord?.id) {
+          tasks.value = tasks.value.filter(t => t.id !== oldRecord.id)
+        }
+        break
+    }
+  }
+
+  // --- MUTATIONS ---
+
+  async function deleteTask(taskId: string, hardDelete: boolean = true) {
+    if (hardDelete) {
+      await supabase.from('tasks').delete().eq('id', taskId)
+    } else {
+      await supabase.rpc('soft_delete_tasks', { task_ids: [taskId] })
+    }
+    // Note: Realtime will handle the local state removal via _handlePayload
+  }
+
   return {
-    // getters
+    tasks,
+    tasksById,
     isInitialized: computed(() => _isInitialized.value),
-    todo,
-    doing,
-    done,
-    deleted,
-    // actions
     fetchAllTasks,
     initRealtime,
-    createTask,
-    deleteTask,
+    deleteTask
   }
 })
