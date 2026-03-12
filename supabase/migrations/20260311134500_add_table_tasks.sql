@@ -1,3 +1,6 @@
+-- 1. 创建任务状态枚举类型
+CREATE TYPE public.task_status AS ENUM ('todo', 'doing', 'done');
+
 -- 任务表 (tasks)
 CREATE TABLE public.tasks (
     id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -6,16 +9,16 @@ CREATE TABLE public.tasks (
     
     title       TEXT NOT NULL DEFAULT '',   -- 任务标题
     description TEXT,                       -- 任务详情
-    status      TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'doing', 'done')),
+    status      task_status NOT NULL DEFAULT 'todo', -- 任务状态
+
     deadline    TIMESTAMPTZ,              -- 截止时间
     start_time  TIMESTAMPTZ,              -- 开始时间
-
     created_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,     -- 创建时间
     updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,     -- 最后更新时间
     deleted_at  TIMESTAMPTZ,                            -- 软删除
     
     sort_order   REAL DEFAULT 0,          -- 排序键，用于自定义任务顺序
-    metadata    JSONB DEFAULT '{}'::JSONB -- 通用扩展字段
+    metadata     JSONB DEFAULT '{}'::JSONB -- 通用扩展字段
 );
 
 
