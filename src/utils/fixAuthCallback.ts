@@ -49,7 +49,7 @@ export async function fixAuthCallback() {
         console.log('Success setting Supabase session:', data)
       }
     }
+    // 清理 URL 哈希参数
+    window.location.hash = ''
   }
-  // 清空 URL 中的哈希参数，避免重复处理
-  window.location.hash = ''
 }
