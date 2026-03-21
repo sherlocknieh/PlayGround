@@ -1,24 +1,40 @@
-import type { Tables } from '@/lib/database.types'
+import type { Enums, Tables, TablesInsert, TablesUpdate } from '@/lib/database.types'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
 
-// 1. 基础数据库模型 (从 Supabase 自动生成)
+// 1. 基础数据类型 (Supabase)
+
+// 任务表结构 (Supabase "tasks" 表)
 export type Task = Tables<'tasks'>
-
-// 2. 树形节点结构 (用于递归组件和逻辑关联)
-export interface TaskNode extends Task {
-  children: TaskNode[]
-}
-
-// 3. 索引表结构 (用于 O(1) 复杂度的快速查找)
-export type TaskMap = Record<string, TaskNode>
-
-// 4. 扁平缩进任务结构 (用于虚拟列表或高性能渲染)
-export interface IndentedTask extends TaskNode {
-  depth: number
-  hasChildren: boolean
-  isExpanded: boolean // 从 metadata 解析
-}
-
-// 5. 实时变化负载类型
+export type TaskInsert = TablesInsert<'tasks'>
+export type TaskUpdate = TablesUpdate<'tasks'>
+export type TaskStatus = Enums<'task_status'>
+// Realtime 负载 (Supabase)
 export type Payload = RealtimePostgresChangesPayload<Task>
+// 任务元数据 (UI状态等非核心数据)
+export type Metadata = {
+  isExpanded: boolean,
+  isLoading: boolean,
+}
+
+
+// 2. 存储层 (Pinia State)
+
+// 任务索引表
+export type TaskMap = Record<string, Task>
+// 层级索引表
+export type SubTaskMap = Record<string, string[]>
+// 任务元数据索引表
+export type MetadataMap = Record<string, Metadata>
+
+
+// 3. 视图层 (UI Composition)
+
+// 扁平化任务列表
+export interface TaskNode {
+  task: Task              // 引用 Pinia 中的原始响应式对象
+  depth: number           // 层级深度
+  hasChildren: boolean    // 是否有子节点
+  isExpanded: boolean     // 展开状态
+  childIds: string[]      // 子节点 ID 列表
+}
