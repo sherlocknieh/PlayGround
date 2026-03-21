@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 
 import type { Task, TaskUpdate } from './tasks.types'
 
@@ -14,6 +14,14 @@ export const useTasksStore = defineStore('tasks', () => {
   // 辅助状态
   const isLoading = ref(false)
   const isRealtimeActive = ref(false)
+
+  /* Getters */
+
+  const active = computed(() => tasks.value.filter(t => !t.deleted_at))
+  const todo = computed(() => tasks.value.filter(t => t.status === 'todo'))
+  const doing = computed(() => tasks.value.filter(t => t.status === 'doing'))
+  const done = computed(() => tasks.value.filter(t => t.status === 'done'))
+  const deleted = computed(() => tasks.value.filter(t => t.deleted_at !== null))
 
   /* Actions */
 
@@ -36,7 +44,6 @@ export const useTasksStore = defineStore('tasks', () => {
         .from('tasks')
         .select('*')
         .eq('user_id', currentUserId)
-        .is('deleted_at', null)
         .order('created_at', { ascending: false })
 
       if (fetchError) throw fetchError
@@ -106,10 +113,11 @@ export const useTasksStore = defineStore('tasks', () => {
 
       if (updated.deleted_at) {
         if (idx >= 0) {
-          tasks.value.splice(idx, 1)
-          console.log(`[🗑️ Soft Delete] Task removed from list (${updated.id})`)
+          tasks.value[idx] = updated
+          console.log(`[🗑️ Soft Delete] Task moved to recycle bin (${updated.id})`)
         } else {
-          console.log(`[ℹ️ Soft Delete] Task not in list (${updated.id}), already removed`)
+          tasks.value.unshift(updated)
+          console.log(`[ℹ️ Soft Delete] Task added to recycle bin (${updated.id})`)
         }
         return
       }
@@ -193,6 +201,23 @@ export const useTasksStore = defineStore('tasks', () => {
 
     console.log('[✅ Delete] Delete request sent, waiting for Realtime response...')
   }
+
+  // 还原任务（从回收站恢复）
+  async function restoreTask(taskId: string) {
+    console.log('[♻️ Restore] Restoring task:', taskId)
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({ deleted_at: null })
+      .eq('id', taskId)
+
+    if (error) {
+      console.error('[❌ Restore Error]', error)
+      throw error
+    }
+
+    console.log('[✅ Restore] Restore request sent, waiting for Realtime response...')
+  }
   // 更新任务
   async function updateTask(taskId: string, updates: TaskUpdate) {
     console.log('[🔧 Update] Updating task:', { taskId, updates })
@@ -208,11 +233,15 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   return {
-    // 数据
-    tasks,
     // 状态
     isLoading,
     isRealtimeActive,
+    // 计算属性
+    active,
+    todo,
+    doing,
+    done,
+    deleted,
     // 生命周期
     initialize,
     openRealtimeChannel,
@@ -220,6 +249,7 @@ export const useTasksStore = defineStore('tasks', () => {
     // 数据操作
     createTask,
     deleteTask,
+    restoreTask,
     updateTask
   }
 })
