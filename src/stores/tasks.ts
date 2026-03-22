@@ -4,74 +4,39 @@ import { supabase } from '@/lib/supabase'
 
 import type { TaskInsert, TaskUpdate, TaskMap, SubTaskMap, MetaDataMap, Payload } from './tasks.types'
 
+// 常量
+const ROOT_ID = 'root'
+
 // 基于 Realtime 的任务数据管理
 export const useTasksStore = defineStore('tasks', () => {
 
   // 任务索引表
   const allTasks = reactive<TaskMap>({})
-  // 子任务索引表
+  // 子任务关系表
   const subTasks = reactive<SubTaskMap>({})
   // 元数据索引表
   const metadata = reactive<MetaDataMap>({})
 
   // 全局状态
   const isLoading = ref(false)
-  const isInitialized = ref(false)
-  const isRealtimeActive = ref(false)
+  const realtimeActive = ref(false)
   const lastError = ref<unknown>(null)
-  const realtimeChannel = ref<ReturnType<typeof supabase.channel> | null>(null)
 
-  const ROOT_ID = 'root'
+  // 内部变量
+  let _isInitialized = false
+  let _hasSetReconnectEvents = false
+  let _realtimeChannel: ReturnType<typeof supabase.channel> | null = null
 
-  function normalizeParentId(parentId: string | null | undefined) {
-    return parentId || ROOT_ID
-  }
-
-  function resetIndexes() {
-    Object.keys(allTasks).forEach((key) => delete allTasks[key])
-    Object.keys(subTasks).forEach((key) => delete subTasks[key])
-    Object.keys(metadata).forEach((key) => delete metadata[key])
-  }
-
-  function ensureMetadata(taskId: string) {
-    metadata[taskId] ??= { isExpanded: false }
-  }
-
-  function addChild(parentId: string | null | undefined, childId: string) {
-    const key = normalizeParentId(parentId)
-    subTasks[key] ??= []
-    if (!subTasks[key].includes(childId)) {
-      subTasks[key].push(childId)
-    }
-  }
-
-  function removeChild(parentId: string | null | undefined, childId: string) {
-    const key = normalizeParentId(parentId)
-    const list = subTasks[key]
-    if (!list?.length) { return }
-    subTasks[key] = list.filter(id => id !== childId)
-    if (subTasks[key].length === 0 && key !== ROOT_ID) {
-      delete subTasks[key]
-    }
-  }
-
-  function removeTaskFromAllParents(taskId: string) {
-    Object.keys(subTasks).forEach((parentId) => {
-      removeChild(parentId, taskId)
-    })
-  }
-
-  // 初始化: 加载初始数据 + 启动订阅
+  // 初始化
   async function initialize() {
-    if (isInitialized.value) { return }
+    if (_isInitialized) { return }
     isLoading.value = true
-
     try {
       lastError.value = null
-      await fetchAllTasks() // 加载初始数据
-      openRealtimeChannel() // 启动 Realtime 订阅
-      isInitialized.value = true
-      console.log('[TasksStore] Initialized')
+      await _fetchAllTasks() // 加载初始数据
+      initRealtime() // 启动 Realtime 订阅
+      _isInitialized = true
+      console.log('[Tasks] TasksStore 初始化完成')
     }
     catch (error) {
       lastError.value = error
@@ -81,30 +46,11 @@ export const useTasksStore = defineStore('tasks', () => {
       isLoading.value = false
     }
   }
-  // 加载所有任务
-  async function fetchAllTasks() {
-    // 查询数据库, 获取所有任务
-    const { data, error } = await supabase.from('tasks').select('*')
-    if (error) throw error
-
-    resetIndexes()
-
-    // 一遍扫描, 构建索引数据
-    data?.forEach(task => {
-      // 填充任务索引表
-      allTasks[task.id] = task
-      // 填充元数据索引表
-      ensureMetadata(task.id)
-      // 填充子任务索引表
-      addChild(task.parent_id, task.id)
-    })
-    console.log(`[Tasks] 从数据库加载了 ${data?.length || 0} 个任务`)
-  }
   // 启动 Realtime 订阅
-  function openRealtimeChannel() {
-    if (realtimeChannel.value) { return }
-
-    realtimeChannel.value = supabase
+  function initRealtime() {
+    if (realtimeActive.value) { return }
+    _realtimeChannel?.unsubscribe()
+    _realtimeChannel = supabase
       .channel('tasks-realtime')
       .on(
         'postgres_changes',
@@ -113,28 +59,86 @@ export const useTasksStore = defineStore('tasks', () => {
           schema: 'public',
           table: 'tasks'
         },
-        (payload) => handleRealtimePayload(payload as Payload)
+        (payload) => _handlePayload(payload as Payload)
       )
       .subscribe((status) => {
-        isRealtimeActive.value = (status === 'SUBSCRIBED')
-        if (status === 'CLOSED') {
-          realtimeChannel.value = null
-        }
+        // 此处能持续监听后续连接状态变化
+        realtimeActive.value = (status === 'SUBSCRIBED')
+        if (status !== 'SUBSCRIBED') { _realtimeChannel = null }
         console.log(`[Realtime] Realtime 订阅状态: ${status}`)
       }
       )
+    // 设置重连条件
+    _setReconnectEvents()
+  }
+  // 关闭 Realtime 订阅
+  function closeRealtime() {
+    _realtimeChannel?.unsubscribe()
+    _realtimeChannel = null
+    realtimeActive.value = false
+  }
+  // 辅助函数: 加载所有任务
+  async function _fetchAllTasks() {
+    // 查询数据库, 获取所有任务
+    const { data, error } = await supabase.from('tasks').select('*')
+    if (error) throw error
+
+    // 重置索引表
+    Object.keys(allTasks).forEach((key) => delete allTasks[key])
+    Object.keys(subTasks).forEach((key) => delete subTasks[key])
+    Object.keys(metadata).forEach((key) => delete metadata[key])
+
+    // 一遍扫描, 构建索引数据
+    data?.forEach(task => {
+      // 填充任务索引表
+      allTasks[task.id] = task
+      // 填充元数据索引表
+      metadata[task.id] ??= { isExpanded: false }
+      // 填充子任务索引表
+      addChild(task.parent_id, task.id)
+    })
+    console.log(`[Tasks] 从数据库取得 ${data?.length || 0} 个任务`)
+  }
+  // 辅助函数: 在特定事件发生时尝试重连 Realtime
+  function _reconnect(event: 'visibilitychange' | 'focus' | 'pageshow') {
+    if (!_isInitialized || realtimeActive.value) { return }
+    console.log(
+      `[Realtime] ${event}: visibility=${typeof document !== 'undefined' ? document.visibilityState : 'unknown'}, initialized=${_isInitialized}, active=${realtimeActive.value}`
+    )
+    initRealtime()
+  }
+  // 辅助函数: 特定条件触发 Realtime 重连
+  function _setReconnectEvents() {
+    if (_hasSetReconnectEvents) { return }
+    if (typeof document === 'undefined' || typeof window === 'undefined') { return }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        _reconnect('visibilitychange')
+      }
+    })
+
+    window.addEventListener('focus', () => {
+      _reconnect('focus')
+    })
+
+    window.addEventListener('pageshow', () => {
+      _reconnect('pageshow')
+    })
+
+    _hasSetReconnectEvents = true
   }
   // 处理 Realtime 负载
-  function handleRealtimePayload(payload: Payload) {
+  function _handlePayload(payload: Payload) {
     switch (payload.eventType) {
       case 'INSERT': {
         console.log('[Realtime] 收到 INSERT 事件:', payload.new)
         // 处理插入事件
         const taskId = payload.new.id
         allTasks[taskId] = payload.new
-        ensureMetadata(taskId)
+        // 初始化元数据
+        metadata[taskId] ??= { isExpanded: false }
         // 处理父子关系
-        removeTaskFromAllParents(taskId)
         addChild(payload.new.parent_id, payload.new.id)
         break
       }
@@ -146,13 +150,14 @@ export const useTasksStore = defineStore('tasks', () => {
         const oldData = allTasks[taskId]
         // 更新任务数据
         allTasks[taskId] = newData
-        ensureMetadata(taskId)
+        // 初始化元数据
+        metadata[taskId] ??= { isExpanded: false }
         // 处理父任务变更
-        const newParentId = normalizeParentId(newData?.parent_id)
-        const oldParentId = normalizeParentId(payload.old?.parent_id || oldData?.parent_id)
+        const newParentId = newData?.parent_id || ROOT_ID
+        const oldParentId = payload.old?.parent_id || oldData?.parent_id || ROOT_ID
         if (newParentId !== oldParentId) {
           // 从旧父任务的子任务列表中移除
-          removeTaskFromAllParents(taskId)
+          removeChild(oldParentId, taskId)
           // 添加到新父任务的子任务列表中
           addChild(newParentId, taskId)
         }
@@ -166,7 +171,7 @@ export const useTasksStore = defineStore('tasks', () => {
         console.log('[Realtime] 收到 DELETE 事件:', payload.old)
         // 处理删除事件
         const taskId = payload.old.id as string
-        removeTaskFromAllParents(taskId)
+        removeChild(payload.old.parent_id, taskId)
         delete allTasks[taskId]
         delete metadata[taskId]
         delete subTasks[taskId]
@@ -174,14 +179,23 @@ export const useTasksStore = defineStore('tasks', () => {
       }
     }
   }
-  // 关闭 Realtime 订阅
-  function closeRealtimeChannel() {
-    const channel = realtimeChannel.value
-    if (channel) {
-      channel.unsubscribe()
-      realtimeChannel.value = null
+  // 辅助函数: 添加子元素关系
+  function addChild(parentId: string | null | undefined, childId: string) {
+    const key = parentId || ROOT_ID
+    subTasks[key] ??= []
+    if (!subTasks[key].includes(childId)) {
+      subTasks[key].push(childId)
     }
-    isRealtimeActive.value = false
+  }
+  // 辅助函数: 移除子元素关系
+  function removeChild(parentId: string | null | undefined, childId: string) {
+    const key = parentId || ROOT_ID
+    const list = subTasks[key]
+    if (!list?.length) { return }
+    subTasks[key] = list.filter(id => id !== childId)
+    if (subTasks[key].length === 0 && key !== ROOT_ID) {
+      delete subTasks[key]
+    }
   }
   // 新建任务
   async function createTask(data: TaskInsert) {
@@ -212,15 +226,6 @@ export const useTasksStore = defineStore('tasks', () => {
     }
     console.log('[Tasks] 已发送任务删除请求', taskId, '等待 Realtime 响应...')
   }
-  // 还原任务
-  async function restoreTask(taskId: string) {
-    const { error } = await supabase.from('tasks').update({ deleted_at: null }).eq('id', taskId)
-    if (error) {
-      console.error('[Tasks] 任务还原失败:', error)
-      throw error
-    }
-    console.log('[Tasks] 任务还原请求已发送', taskId, '等待 Realtime 响应...')
-  }
   // 更新任务
   async function updateTask(taskId: string, updates: TaskUpdate) {
     const { error } = await supabase.from('tasks').update(updates).eq('id', taskId)
@@ -228,28 +233,24 @@ export const useTasksStore = defineStore('tasks', () => {
       console.error('[Tasks] 任务更新失败:', error)
       throw error
     }
-    console.log('[Tasks] 任务更新请求已发送', taskId, '等待 Realtime 响应...')
+    console.log('[Tasks] UPDATE 请求已发送', '等待 Realtime 响应...')
   }
-
-
   return {
-    // 状态
-    isLoading,
-    isInitialized,
-    isRealtimeActive,
-    lastError,
+    // 只读状态:
+    lastError: computed(() => lastError.value),
+    isLoading: computed(() => isLoading.value),
+    realtimeActive: computed(() => realtimeActive.value),
+    // 数据:
     metadata,
-    // 只读数据:
-    // 活跃任务表
     active: computed(() => Object.values(allTasks).filter(t => !t.deleted_at)),
+    deleted: computed(() => Object.values(allTasks).filter(t => t.deleted_at)),
     // 生命周期管理
     initialize,
-    openRealtimeChannel,
-    closeRealtimeChannel,
+    initRealtime,
+    closeRealtime,
     // 基本任务管理
     createTask,
     deleteTask,
-    restoreTask,
     updateTask,
   }
 })
