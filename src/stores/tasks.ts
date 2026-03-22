@@ -18,50 +18,92 @@ export const useTasksStore = defineStore('tasks', () => {
   const isLoading = ref(false)
   const isInitialized = ref(false)
   const isRealtimeActive = ref(false)
-  const realtimeChannel = ref<any>(null)
+  const lastError = ref<unknown>(null)
+  const realtimeChannel = ref<ReturnType<typeof supabase.channel> | null>(null)
+
+  const ROOT_ID = 'root'
+
+  function normalizeParentId(parentId: string | null | undefined) {
+    return parentId || ROOT_ID
+  }
+
+  function resetIndexes() {
+    Object.keys(allTasks).forEach((key) => delete allTasks[key])
+    Object.keys(subTasks).forEach((key) => delete subTasks[key])
+    Object.keys(metadata).forEach((key) => delete metadata[key])
+  }
+
+  function ensureMetadata(taskId: string) {
+    metadata[taskId] ??= { isExpanded: false }
+  }
+
+  function addChild(parentId: string | null | undefined, childId: string) {
+    const key = normalizeParentId(parentId)
+    subTasks[key] ??= []
+    if (!subTasks[key].includes(childId)) {
+      subTasks[key].push(childId)
+    }
+  }
+
+  function removeChild(parentId: string | null | undefined, childId: string) {
+    const key = normalizeParentId(parentId)
+    const list = subTasks[key]
+    if (!list?.length) { return }
+    subTasks[key] = list.filter(id => id !== childId)
+    if (subTasks[key].length === 0 && key !== ROOT_ID) {
+      delete subTasks[key]
+    }
+  }
+
+  function removeTaskFromAllParents(taskId: string) {
+    Object.keys(subTasks).forEach((parentId) => {
+      removeChild(parentId, taskId)
+    })
+  }
 
   // 初始化: 加载初始数据 + 启动订阅
   async function initialize() {
     if (isInitialized.value) { return }
     isLoading.value = true
 
-    await fetchAllTasks() // 加载初始数据
-    openRealtimeChannel() // 启动 Realtime 订阅
-
-    isLoading.value = false
-    isInitialized.value = true
-    console.log('[TasksStore] Initialized')
+    try {
+      lastError.value = null
+      await fetchAllTasks() // 加载初始数据
+      openRealtimeChannel() // 启动 Realtime 订阅
+      isInitialized.value = true
+      console.log('[TasksStore] Initialized')
+    }
+    catch (error) {
+      lastError.value = error
+      throw error
+    }
+    finally {
+      isLoading.value = false
+    }
   }
   // 加载所有任务
   async function fetchAllTasks() {
     // 查询数据库, 获取所有任务
     const { data, error } = await supabase.from('tasks').select('*')
     if (error) throw error
+
+    resetIndexes()
+
     // 一遍扫描, 构建索引数据
     data?.forEach(task => {
       // 填充任务索引表
       allTasks[task.id] = task
       // 填充元数据索引表
-      metadata[task.id] = {
-        isExpanded: false,
-      }
+      ensureMetadata(task.id)
       // 填充子任务索引表
-      if (task.parent_id) {
-        const parentId = task.parent_id
-        subTasks[parentId] ??= []
-        subTasks[parentId].push(task.id)
-      }
-      // 根任务挂在 subTasks['root'] 下
-      else {
-        subTasks['root'] ??= []
-        subTasks['root'].push(task.id)
-      }
+      addChild(task.parent_id, task.id)
     })
     console.log(`[Tasks] 从数据库加载了 ${data?.length || 0} 个任务`)
   }
   // 启动 Realtime 订阅
   function openRealtimeChannel() {
-    if (isRealtimeActive.value) { return }
+    if (realtimeChannel.value) { return }
+
     realtimeChannel.value = supabase
       .channel('tasks-realtime')
       .on(
@@ -75,6 +117,9 @@ export const useTasksStore = defineStore('tasks', () => {
       )
       .subscribe((status) => {
         isRealtimeActive.value = (status === 'SUBSCRIBED')
+        if (status === 'CLOSED') {
+          realtimeChannel.value = null
+        }
         console.log(`[Realtime] Realtime 订阅状态: ${status}`)
       }
       )
@@ -87,13 +132,10 @@ export const useTasksStore = defineStore('tasks', () => {
         // 处理插入事件
         const taskId = payload.new.id
         allTasks[taskId] = payload.new
-        metadata[taskId] = {
-          isExpanded: false
-        }
+        ensureMetadata(taskId)
         // 处理父子关系
-        const parentId = payload.new.parent_id || 'root'
-        subTasks[parentId] ??= []
-        subTasks[parentId].push(payload.new.id)
+        removeTaskFromAllParents(taskId)
+        addChild(payload.new.parent_id, payload.new.id)
         break
       }
       case 'UPDATE': {
@@ -104,16 +146,19 @@ export const useTasksStore = defineStore('tasks', () => {
         const oldData = allTasks[taskId]
         // 更新任务数据
         allTasks[taskId] = newData
+        ensureMetadata(taskId)
         // 处理父任务变更
-        const newParentId = newData?.parent_id || 'root'
-        const oldParentId = oldData?.parent_id || 'root'
+        const newParentId = normalizeParentId(newData?.parent_id)
+        const oldParentId = normalizeParentId(payload.old?.parent_id || oldData?.parent_id)
         if (newParentId !== oldParentId) {
           // 从旧父任务的子任务列表中移除
-          subTasks[oldParentId] ??= []
-          subTasks[oldParentId] = subTasks[oldParentId].filter(id => id !== taskId)
+          removeTaskFromAllParents(taskId)
           // 添加到新父任务的子任务列表中
-          subTasks[newParentId] ??= []
-          subTasks[newParentId].push(taskId)
+          addChild(newParentId, taskId)
+        }
+        else {
+          // 防御性去重, 避免重放/乱序事件导致同父节点重复挂载
+          addChild(newParentId, taskId)
         }
         break
       }
@@ -121,12 +166,7 @@ export const useTasksStore = defineStore('tasks', () => {
         console.log('[Realtime] 收到 DELETE 事件:', payload.old)
         // 处理删除事件
         const taskId = payload.old.id as string
-        const localData = allTasks[taskId]
-        if (localData) {
-          const parentId = payload.old.parent_id || 'root'
-          subTasks[parentId] ??= []
-          subTasks[parentId] = subTasks[parentId].filter(id => id !== taskId)
-        }
+        removeTaskFromAllParents(taskId)
         delete allTasks[taskId]
         delete metadata[taskId]
         delete subTasks[taskId]
@@ -136,7 +176,11 @@ export const useTasksStore = defineStore('tasks', () => {
   }
   // 关闭 Realtime 订阅
   function closeRealtimeChannel() {
-    realtimeChannel.value?.unsubscribe()
+    const channel = realtimeChannel.value
+    if (channel) {
+      channel.unsubscribe()
+      realtimeChannel.value = null
+    }
     isRealtimeActive.value = false
     console.log('[Realtime] Realtime 订阅已关闭')
   }
@@ -192,7 +236,9 @@ export const useTasksStore = defineStore('tasks', () => {
   return {
     // 状态
     isLoading,
+    isInitialized,
     isRealtimeActive,
+    lastError,
     metadata,
     // 只读数据:
     // 活跃任务表
