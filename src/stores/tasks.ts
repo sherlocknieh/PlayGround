@@ -61,8 +61,15 @@ export const useTasksStore = defineStore('tasks', () => {
   async function createTask(title: string, description?: string) {
     logger.log('Creating task:', { title, description })
 
+    // 获取当前认证用户的 ID
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user?.id) {
+      throw new Error('User not authenticated')
+    }
+
     logger.log('Create task: inserting to database...')
     const { error } = await supabase.from('tasks').insert({
+      user_id: user.id,
       title: title.trim(),
       description: description || null,
       status: 'todo',
