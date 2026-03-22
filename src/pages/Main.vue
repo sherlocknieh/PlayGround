@@ -21,7 +21,7 @@ onMounted(async () => {
 
 // 清理
 onBeforeUnmount(() => {
-  tasks.closeRealtimeChannel()
+  tasks.closeRealtime()
 })
 
 // 添加任务
@@ -60,7 +60,7 @@ async function addTask() {
       <p class="text-sm text-gray-600 dark:text-gray-300">
         Realtime 状态：
         <span
-          v-if="tasks.isRealtimeActive"
+          v-if="tasks.realtimeActive"
           class="inline-flex items-center gap-1 ml-2 px-2 py-1 bg-green-200 text-green-800 rounded text-xs font-medium"
         >
           <span class="w-2 h-2 bg-green-600 rounded-full"></span>
@@ -71,13 +71,13 @@ async function addTask() {
           未连接
         </span>
       </p>
-      <span v-if="tasks.isRealtimeActive" class="text-sm text-gray-600 dark:text-gray-300">
-      <button @click="tasks.closeRealtimeChannel" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+      <span v-if="tasks.realtimeActive" class="text-sm text-gray-600 dark:text-gray-300">
+      <button @click="tasks.closeRealtime" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
         断开连接
       </button>
       </span>
       <span v-else class="text-sm text-gray-600 dark:text-gray-300">
-         <button @click="tasks.openRealtimeChannel" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+         <button @click="tasks.initRealtime" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
           连接
         </button>
       </span>

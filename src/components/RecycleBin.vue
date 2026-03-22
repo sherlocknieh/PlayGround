@@ -9,7 +9,7 @@ const restoringId = ref<string | null>(null)
 async function restoreTask(taskId: string) {
   restoringId.value = taskId
   try {
-    await tasksStore.restoreTask(taskId)
+    await tasksStore.updateTask(taskId, { deleted_at: null })
   } catch (err) {
     console.error('还原失败:', err)
   } finally {
