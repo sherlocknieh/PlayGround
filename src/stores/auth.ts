@@ -23,7 +23,7 @@ export const useAuthStore = defineStore('auth', () => {
     supabase.auth.onAuthStateChange((event, session) => {
       _session.value = session
       _loading.value = false
-      console.log('Auth State Change:', event)
+      console.log('[Auth] 认证状态变化:', event)
     })
 
     _initialized.value = true
