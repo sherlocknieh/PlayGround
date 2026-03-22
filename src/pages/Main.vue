@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
-import RecycleBin from '@/components/RecycleBin.vue'
+import { useAuthStore } from '@/stores/auth'
+import TaskTree from '@/components/TaskTree.vue'
 
 const tasks = useTasksStore()
+const auth = useAuthStore()
 const newTaskTitle = ref('')
 const newTaskDesc = ref('')
 const creatingTask = ref(false)
-const deletingId = ref<string | null>(null)
 
 // 初始化
 onMounted(async () => {
@@ -25,11 +26,21 @@ onBeforeUnmount(() => {
 
 // 添加任务
 async function addTask() {
+  const userId = auth.user?.id
   if (!newTaskTitle.value.trim()) return
+  if (!userId) {
+    console.error('创建失败: 未登录或用户信息不可用')
+    return
+  }
 
   creatingTask.value = true
   try {
-    await tasks.createTask(newTaskTitle.value, newTaskDesc.value || undefined)
+    await tasks.createTask({
+      user_id: userId,
+      title: newTaskTitle.value,
+      description: newTaskDesc.value || null,
+      parent_id: null,
+    })
     newTaskTitle.value = ''
     newTaskDesc.value = ''
   } catch (err) {
@@ -39,33 +50,7 @@ async function addTask() {
   }
 }
 
-// 切换状态
-async function toggleStatus(taskId: string, currentStatus: string) {
-  const newStatus = currentStatus === 'todo' ? 'done' : 'todo'
-  try {
-    await tasks.updateTask(taskId, { status: newStatus as any })
-  } catch (err) {
-    console.error('更新失败:', err)
-  }
-}
 
-// 删除任务
-async function removeTask(taskId: string) {
-
-  deletingId.value = taskId
-  try {
-    await tasks.deleteTask(taskId) // 软删除
-  } catch (err) {
-    console.error('删除失败:', err)
-  } finally {
-    deletingId.value = null
-  }
-}
-
-// 获取状态样式
-function getStatusClass(status: string) {
-  return status === 'done' ? 'line-through opacity-50' : ''
-}
 </script>
 
 <template>
@@ -86,6 +71,16 @@ function getStatusClass(status: string) {
           未连接
         </span>
       </p>
+      <span v-if="tasks.isRealtimeActive" class="text-sm text-gray-600 dark:text-gray-300">
+      <button @click="tasks.closeRealtimeChannel" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+        断开连接
+      </button>
+      </span>
+      <span v-else class="text-sm text-gray-600 dark:text-gray-300">
+         <button @click="tasks.openRealtimeChannel" class="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
+          连接
+        </button>
+      </span>
     </div>
 
     <!-- 新增任务表单 -->
@@ -106,7 +101,7 @@ function getStatusClass(status: string) {
         ></textarea>
         <button
           @click="addTask"
-          :disabled="!newTaskTitle.trim() || creatingTask"
+          :disabled="!newTaskTitle.trim() || creatingTask || !auth.user"
           class="w-full px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {{ creatingTask ? '创建中...' : '创建' }}
@@ -117,6 +112,13 @@ function getStatusClass(status: string) {
     <!-- 加载状态 -->
     <div v-if="tasks.isLoading" class="text-center py-8">
       <p class="text-gray-600 dark:text-gray-400">加载中...</p>
+    </div>
+
+    <div
+      v-else-if="tasks.lastError"
+      class="mb-6 p-4 rounded border border-red-300 bg-red-50 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300"
+    >
+      初始化失败，请稍后重试。
     </div>
 
     <!-- 任务列表 -->
@@ -130,53 +132,14 @@ function getStatusClass(status: string) {
         <p class="text-gray-500 dark:text-gray-400">暂无任务</p>
       </div>
 
-      <div
-        v-for="task in tasks.active"
-        :key="task.id"
-        class="flex items-start gap-3 p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 dark:border-gray-600 dark:bg-gray-800 transition"
-      >
-        <!-- 状态复选框 -->
-        <button
-          @click="toggleStatus(task.id, task.status)"
-          :class="[
-            'mt-1 w-5 h-5 border-2 rounded flex items-center justify-center shrink-0',
-            task.status === 'done'
-              ? 'bg-green-500 border-green-500'
-              : 'border-gray-300 hover:border-green-500'
-          ]"
-          :title="`切换状态：${task.status}`"
-        >
-          <span v-if="task.status === 'done'" class="text-white text-xs">✓</span>
-        </button>
-
-        <!-- 任务内容 -->
-        <div class="flex-1 min-w-0">
-          <p :class="['font-medium dark:text-white', getStatusClass(task.status)]">
-            {{ task.title }}
-          </p>
-          <p
-            v-if="task.description"
-            :class="['text-sm text-gray-600 dark:text-gray-400 mt-1', getStatusClass(task.status)]"
-          >
-            {{ task.description }}
-          </p>
-          <p class="text-xs text-gray-500 dark:text-gray-500 mt-2">
-            创建于：{{ new Date(task.created_at).toLocaleString('zh-CN') }}
-          </p>
-        </div>
-
-        <!-- 删除按钮 -->
-        <button
-          @click="removeTask(task.id)"
-          :disabled="deletingId === task.id"
-          class="px-3 py-1 text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded hover:bg-red-50 dark:hover:bg-red-900 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-        >
-          {{ deletingId === task.id ? '删除中...' : '删除' }}
-        </button>
+      <div v-else class="space-y-2 border rounded-lg p-4 dark:border-gray-600 dark:bg-gray-800">
+        <TaskTree
+          v-for="task in tasks.active"
+          :key="task.id"
+          :task="task"
+        />
       </div>
     </div>
-
-    <RecycleBin />
   </div>
 </template>
 

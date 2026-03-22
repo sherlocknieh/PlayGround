@@ -182,7 +182,6 @@ export const useTasksStore = defineStore('tasks', () => {
       realtimeChannel.value = null
     }
     isRealtimeActive.value = false
-    console.log('[Realtime] Realtime 订阅已关闭')
   }
   // 新建任务
   async function createTask(data: TaskInsert) {
