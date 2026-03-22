@@ -6,9 +6,10 @@ import type { Task, TaskUpdate } from './tasks.types'
 import { createLogger } from '@/utils/logger'
 import { useRealtime } from './tasks.realtime'
 
+const logger = createLogger('TasksStore', 'Realtime')
+
 // 极简任务管理
 export const useTasksStore = defineStore('tasks', () => {
-  const logger = createLogger('TasksStore', { namespace: 'Realtime' })
 
   /* States */
 
@@ -17,7 +18,6 @@ export const useTasksStore = defineStore('tasks', () => {
   // 辅助状态
   const isLoading = ref(false)
   const isRealtimeActive = ref(false)
-  const currentUserId = ref<string | null>(null)
 
   /* Getters */
 
@@ -26,69 +26,43 @@ export const useTasksStore = defineStore('tasks', () => {
   const doing = computed(() => tasks.value.filter(t => t.status === 'doing'))
   const done = computed(() => tasks.value.filter(t => t.status === 'done'))
   const deleted = computed(() => tasks.value.filter(t => t.deleted_at !== null))
+  const realtime = useRealtime({
+    tasks,
+    isRealtimeActive,
+    fetchAllTasks
+  })
 
   /* Actions */
 
-  async function fetchAllTasks(userId: string) {
+  async function fetchAllTasks() {
     const { data, error } = await supabase
       .from('tasks')
       .select('*')
-      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
     tasks.value = (data as Task[]) || []
   }
 
-  const realtime = useRealtime({
-    tasks,
-    isRealtimeActive,
-    currentUserId,
-    fetchAllTasks
-  })
-
   // 初始化：加载任务 + 启动 Realtime 订阅
   async function initialize() {
-    logger.log('Initializing store...')
     isLoading.value = true
+    logger.log('Initializing store...')
 
-    try {
-      // 获取当前用户
-      const { data: userData, error: userError } = await supabase.auth.getUser()
-      if (userError || !userData.user) {
-        throw new Error('用户未登录')
-      }
-      currentUserId.value = userData.user.id
-      logger.log('Current user:', currentUserId.value)
+    await fetchAllTasks()
+    logger.log(`Loaded ${tasks.value.length} tasks from database`)
 
-      // 加载任务
-      await fetchAllTasks(currentUserId.value)
-      logger.log(`Loaded ${tasks.value.length} tasks from database`)
+    void realtime.openRealtimeChannel()
+    logger.log(`Store initialized with ${tasks.value.length} tasks`)
 
-      // 启动 Realtime 订阅（只监听当前用户的任务）
-      void realtime.openRealtimeChannel(currentUserId.value)
-
-      logger.log(`Store initialized with ${tasks.value.length} tasks`)
-    } catch (err) {
-      logger.error('Initialize failed:', err)
-      throw err
-    } finally {
-      isLoading.value = false
-    }
+    isLoading.value = false
   }
   // 新建任务
   async function createTask(title: string, description?: string) {
     logger.log('Creating task:', { title, description })
 
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData.user) {
-      logger.error('Create task failed: user not logged in')
-      throw new Error('用户未登录')
-    }
-
     logger.log('Create task: inserting to database...')
     const { error } = await supabase.from('tasks').insert({
-      user_id: userData.user.id,
       title: title.trim(),
       description: description || null,
       status: 'todo',
@@ -168,6 +142,8 @@ export const useTasksStore = defineStore('tasks', () => {
     deleted,
     // 生命周期
     initialize,
+    closeRealtimeChannel: realtime.closeRealtimeChannel,
+    realtime,
     // 数据操作
     createTask,
     deleteTask,
