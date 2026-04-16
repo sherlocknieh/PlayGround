@@ -6,6 +6,18 @@ import type { TaskInsert, TaskUpdate, TaskMap, SubTaskMap, MetaDataMap, Payload 
 
 // 常量
 const ROOT_ID = 'root'
+const REALTIME_ACK_TIMEOUT_MS = 5000
+
+type MutationKind = 'insert' | 'update' | 'delete'
+
+type RealtimeMutation = {
+  kind: MutationKind
+  taskId: string
+  resolve: () => void
+  timeoutId: ReturnType<typeof setTimeout>
+}
+
+type PendingMutationState = Record<string, MutationKind | undefined>
 
 // 基于 Realtime 的任务数据管理
 export const useTasksStore = defineStore('tasks', () => {
@@ -26,6 +38,8 @@ export const useTasksStore = defineStore('tasks', () => {
   let _isInitialized = false
   let _hasSetReconnectEvents = false
   let _realtimeChannel: ReturnType<typeof supabase.channel> | null = null
+  const _pendingMutations = reactive<PendingMutationState>({})
+  const _mutationWaiters = new Map<string, RealtimeMutation>()
 
   // 初始化
   async function initialize() {
@@ -140,6 +154,7 @@ export const useTasksStore = defineStore('tasks', () => {
         metadata[taskId] ??= { isExpanded: false }
         // 处理父子关系
         addChild(payload.new.parent_id, payload.new.id)
+        _resolveRealtimeMutation('insert', taskId)
         break
       }
       case 'UPDATE': {
@@ -165,6 +180,7 @@ export const useTasksStore = defineStore('tasks', () => {
           // 防御性去重, 避免重放/乱序事件导致同父节点重复挂载
           addChild(newParentId, taskId)
         }
+        _resolveRealtimeMutation('update', taskId)
         break
       }
       case 'DELETE': {
@@ -175,9 +191,47 @@ export const useTasksStore = defineStore('tasks', () => {
         delete allTasks[taskId]
         delete metadata[taskId]
         delete subTasks[taskId]
+        _resolveRealtimeMutation('delete', taskId)
         break
       }
     }
+  }
+  // 等待对应的 Realtime 响应
+  function _waitForRealtimeMutation(kind: MutationKind, taskId: string) {
+    const key = `${kind}:${taskId}`
+
+    return new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        const error = new Error('等待 Realtime 响应超时')
+        delete _pendingMutations[key]
+        _mutationWaiters.delete(key)
+        reject(error)
+      }, REALTIME_ACK_TIMEOUT_MS)
+
+      _pendingMutations[key] = kind
+      _mutationWaiters.set(key, { kind, taskId, resolve, timeoutId })
+    })
+  }
+  // 取消指定的 Realtime 等待
+  function _cancelRealtimeMutation(kind: MutationKind, taskId: string) {
+    const key = `${kind}:${taskId}`
+    const pending = _mutationWaiters.get(key)
+    if (!pending) { return }
+
+    clearTimeout(pending.timeoutId)
+    delete _pendingMutations[key]
+    _mutationWaiters.delete(key)
+  }
+  // 处理 Realtime 响应，解除对应等待
+  function _resolveRealtimeMutation(kind: MutationKind, taskId: string) {
+    const key = `${kind}:${taskId}`
+    const pending = _mutationWaiters.get(key)
+    if (!pending) { return }
+
+    clearTimeout(pending.timeoutId)
+    delete _pendingMutations[key]
+    _mutationWaiters.delete(key)
+    pending.resolve()
   }
   // 辅助函数: 添加子元素关系
   function addChild(parentId: string | null | undefined, childId: string) {
@@ -199,20 +253,29 @@ export const useTasksStore = defineStore('tasks', () => {
   }
   // 新建任务
   async function createTask(data: TaskInsert) {
-    const { error } = await supabase.from('tasks').insert(data)
+    const taskId = data.id || crypto.randomUUID()
+    const waitForInsert = _waitForRealtimeMutation('insert', taskId)
+    const { error } = await supabase.from('tasks').insert({ ...data, id: taskId })
     if (error) {
       console.error('[Tasks] Create task failed: database insert error', error)
+      _cancelRealtimeMutation('insert', taskId)
       throw error
     }
-    console.log('[Tasks] 已发送任务创建请求', data, '等待 Realtime 响应...')
+
+    await waitForInsert
+    console.log('[Tasks] 任务创建已收到 Realtime 响应', taskId)
   }
   // 删除任务
   async function deleteTask(taskId: string, method: 'soft' | 'hard' = 'soft') {
+    const mutationKind: MutationKind = method === 'hard' ? 'delete' : 'update'
+    const waitForMutation = _waitForRealtimeMutation(mutationKind, taskId)
+
     // 硬删除
     if (method === 'hard') {
       const { error } = await supabase.from('tasks').delete().eq('id', taskId)
       if (error) {
         console.error('[Tasks] 任务删除失败:', error)
+        _cancelRealtimeMutation(mutationKind, taskId)
         throw error
       }
     }
@@ -221,19 +284,27 @@ export const useTasksStore = defineStore('tasks', () => {
       const { error } = await supabase.rpc('soft_delete_tasks', { task_ids: [taskId] })
       if (error) {
         console.error('[Tasks] 任务软删除失败:', error)
+        _cancelRealtimeMutation(mutationKind, taskId)
         throw error
       }
     }
-    console.log('[Tasks] 已发送任务删除请求', taskId, '等待 Realtime 响应...')
+
+    await waitForMutation
+    console.log('[Tasks] 任务删除已收到 Realtime 响应', taskId)
   }
   // 更新任务
   async function updateTask(taskId: string, updates: TaskUpdate) {
+    const waitForUpdate = _waitForRealtimeMutation('update', taskId)
+
     const { error } = await supabase.from('tasks').update(updates).eq('id', taskId)
     if (error) {
       console.error('[Tasks] 任务更新失败:', error)
+      _cancelRealtimeMutation('update', taskId)
       throw error
     }
-    console.log('[Tasks] UPDATE 请求已发送', '等待 Realtime 响应...')
+
+    await waitForUpdate
+    console.log('[Tasks] 任务更新已收到 Realtime 响应', taskId)
   }
   return {
     // 只读状态:
@@ -242,7 +313,12 @@ export const useTasksStore = defineStore('tasks', () => {
     realtimeActive: computed(() => realtimeActive.value),
     // 数据:
     metadata,
-    active: computed(() => Object.values(allTasks).filter(t => !t.deleted_at)),
+    isTaskMutating: (taskId: string, kind?: MutationKind) => {
+      if (kind) { return _pendingMutations[`${kind}:${taskId}`] === kind }
+      return Object.keys(_pendingMutations).some(key => key.endsWith(`:${taskId}`))
+    },
+    active: computed(() => Object.values(allTasks).filter(t => !t.deleted_at && t.status !== 'done')),
+    completed: computed(() => Object.values(allTasks).filter(t => !t.deleted_at && t.status === 'done')),
     deleted: computed(() => Object.values(allTasks).filter(t => t.deleted_at)),
     // 生命周期管理
     initialize,
