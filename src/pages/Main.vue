@@ -3,6 +3,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useTasksStore } from '@/stores/tasks'
 import { useAuthStore } from '@/stores/auth'
 import TaskTree from '@/components/TaskTree.vue'
+import RecycleBin from '@/components/RecycleBin.vue'
 
 const tasks = useTasksStore()
 const auth = useAuthStore()
@@ -139,6 +140,30 @@ async function addTask() {
           :task="task"
         />
       </div>
+
+      <!-- 已完成 -->
+      <section class="mt-6 p-4 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-700">
+        <h2 class="text-lg font-semibold mb-4 dark:text-white">已完成（共 {{ tasks.completed.length }} 个）</h2>
+
+        <div
+          v-if="tasks.completed.length === 0"
+          class="p-6 text-center border-2 border-dashed rounded bg-gray-50 dark:bg-gray-900 dark:border-gray-600"
+        >
+          <p class="text-gray-500 dark:text-gray-400">暂无已完成任务</p>
+        </div>
+
+        <div v-else class="space-y-2">
+          <TaskTree
+            v-for="task in tasks.completed"
+            :key="task.id"
+            :task="task"
+          />
+        </div>
+      </section>
+
+      <!-- 回收站 -->
+      <RecycleBin />
+      
     </div>
   </div>
 </template>
