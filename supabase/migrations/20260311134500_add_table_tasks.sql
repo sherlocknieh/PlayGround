@@ -17,7 +17,7 @@ CREATE TABLE public.tasks (
     updated_at  TIMESTAMPTZ DEFAULT NOW() NOT NULL,     -- 最后更新时间
     deleted_at  TIMESTAMPTZ,                            -- 软删除
     
-    sort_order   REAL DEFAULT 0,          -- 排序键，用于自定义任务顺序
+    sort_order   REAL,                     -- 排序键，用于自定义任务顺序
     metadata     JSONB DEFAULT '{}'::JSONB -- 通用扩展字段
 );
 
@@ -57,9 +57,9 @@ RETURNS TRIGGER
 SET search_path = ''    -- 设置 search_path, 避免 Function Search Path Mutable 安全警告
 AS $$
 BEGIN
-  -- 若未指定 sort_order 值，则根据当前父任务下的最大 sort_order 生成新值
+  -- 若用户未指定 sort_order 值，则根据当前父任务下的最大 sort_order 生成新值
   IF NEW.sort_order IS NULL THEN
-    SELECT COALESCE(MAX(sort_order), 0) + 65536.0 
+    SELECT COALESCE(MAX(sort_order), 0) + 1
     INTO NEW.sort_order
     FROM public.tasks
     WHERE user_id = NEW.user_id 
